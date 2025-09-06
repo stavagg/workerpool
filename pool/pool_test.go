@@ -54,10 +54,8 @@ func TestPanicDoesNotKillWorker(t *testing.T) {
 	p, _ := New(2, 4)
 	done := make(chan struct{})
 
-	// Задача с паникой
 	_ = p.Submit(func() { panic("boom") })
 
-	// Нормальные задачи после паники
 	const n = 10
 	var c int64
 	for i := 0; i < n; i++ {
@@ -81,44 +79,29 @@ func TestPanicDoesNotKillWorker(t *testing.T) {
 	}
 }
 
-func TestBackpressure(t *testing.T) {
-	// Очередь размера 1 и один воркер: вторая отправка должна блокироваться,
-	// пока воркер не возьмёт первую задачу.
-	p, _ := New(1, 1)
-	started := make(chan struct{})
-	release := make(chan struct{})
+func TestQueueFullError(t *testing.T) {
+	p, err := New(1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Первая задача держит воркера
+	release := make(chan struct{})
 	if err := p.Submit(func() {
-		close(started)
 		<-release
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Вторая задача должна заблокироваться до освобождения места
-	blockedDone := make(chan struct{})
-	go func() {
-		_ = p.Submit(func() {})
-		close(blockedDone)
-	}()
-
-	// Убедимся, что реально блокируется
-	select {
-	case <-blockedDone:
-		t.Fatal("second submit should be blocked")
-	case <-time.After(100 * time.Millisecond):
-		// ок, блокируется
+	if err := p.Submit(func() {}); err != nil {
+		t.Fatalf("unexpected error for buffered task: %v", err)
 	}
 
-	// Освобождаем воркера — теперь вторая задача должна пройти
+	if err := p.Submit(func() {}); !errors.Is(err, ErrQueueFull) {
+		t.Fatalf("want ErrQueueFull, got %v", err)
+	}
+
 	close(release)
-	select {
-	case <-blockedDone:
-		// ок
-	case <-time.After(1 * time.Second):
-		t.Fatal("second submit did not complete after release")
+	if err := p.Stop(); err != nil {
+		t.Fatal(err)
 	}
-
-	_ = p.Stop()
 }

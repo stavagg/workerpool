@@ -6,8 +6,10 @@ import (
 )
 
 func (p *pool) worker() {
+
 	defer p.wg.Done()
 	for task := range p.tasks {
+		var pan any
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -16,6 +18,8 @@ func (p *pool) worker() {
 			}()
 			task()
 		}()
-
+		if h := p.postHook; h != nil {
+			h(pan)
+		}
 	}
 }
